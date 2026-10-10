@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  DATABASE_URL = "file:./dev.db"
+  NEXTAUTH_SECRET = "foodsave-jwt-super-secret-key-32chars-min"
+  NEXTAUTH_URL = "http://localhost:3000"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
