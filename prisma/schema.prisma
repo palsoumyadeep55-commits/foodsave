@@ -3,74 +3,32 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  individual
-  donor
-  ngo
-  admin
-}
-
-enum ListingStatus {
-  active
-  claimed
-  completed
-  expired
-  cancelled
-}
-
-enum ClaimStatus {
-  pending
-  approved
-  rejected
-  fulfilled
-  no_show
-}
-
-enum IngredientCategory {
-  produce
-  dairy
-  meat
-  pantry
-  frozen
-  other
-}
-
-enum LocationType {
-  community_fridge
-  food_bank
-  shelter
-}
-
-enum WasteUnit {
-  kg
-  lbs
-  items
-}
-
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  passwordHash String?
-  fullName     String
-  primaryRole  UserRole  @default(individual)
-  phoneNumber  String?
-  image        String?
-  emailVerified DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id               String    @id @default(uuid())
+  email            String    @unique
+  passwordHash     String?
+  fullName         String
+  primaryRole      String    @default("individual") // individual | donor | ngo | admin
+  phoneNumber      String?
+  city             String?
+  image            String?
+  organizationName String?
+  emailVerified    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
 
-  donorProfile     DonorProfile?
-  ngoProfile       NgoProfile?
+  donorProfile      DonorProfile?
+  ngoProfile        NgoProfile?
   fridgeIngredients FridgeIngredient[]
-  savingsLogs      SavingsLog[]
-  wasteLogs        WasteLog[]
-  listingClaims    ListingClaim[]
-  managedLocations CommunityLocation[]
+  savingsLogs       SavingsLog[]
+  wasteLogs         WasteLog[]
+  listingClaims     ListingClaim[]
+  managedLocations  CommunityLocation[]
 
   @@map("users")
 }
@@ -79,15 +37,16 @@ model DonorProfile {
   id           String   @id @default(uuid())
   userId       String   @unique
   businessName String
-  description  String?  @db.Text
-  address      String   @db.Text
-  latitude     Decimal? @db.Decimal(10, 8)
-  longitude    Decimal? @db.Decimal(11, 8)
+  description  String?
+  address      String
+  latitude     Float?
+  longitude    Float?
   isVerified   Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   user         User     @relation(fields: [userId], references: [id])
   listings     FoodListing[]
+
   @@map("donor_profiles")
 }
 
@@ -96,125 +55,165 @@ model NgoProfile {
   userId           String   @unique
   organizationName String
   taxId            String?
-  address          String   @db.Text
-  latitude         Decimal? @db.Decimal(10, 8)
-  longitude        Decimal? @db.Decimal(11, 8)
+  address          String
+  latitude         Float?
+  longitude        Float?
   isVerified       Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   user             User     @relation(fields: [userId], references: [id])
+
   @@map("ngo_profiles")
 }
 
 model FoodListing {
-  id                  String        @id @default(uuid())
-  donorId             String
+  id                  String   @id @default(uuid())
+  donorId             String?
+  donorName           String
+  donorType           String   @default("bakery") // bakery | restaurant | grocery | individual | wedding_caterer | mandi_wholesaler
+  donorCity           String
+  donorCountry        String?  @default("India")
+  donorCountryCode    String?  @default("IN")
+  donorAddress        String
   title               String
-  description         String?       @db.Text
-  quantityDescription String
+  description         String?
+  category            String   @default("Meals") // Bakery | Produce | Meals | Dairy | Pantry | Rice & Grains
+  quantity            String
+  price               Float    @default(0)
+  originalPrice       Float?
+  currencySymbol      String   @default("₹")
   expiryTime          DateTime
   pickupStartTime     DateTime
   pickupEndTime       DateTime
-  status              ListingStatus @default(active)
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  status              String   @default("active") // active | claimed | completed | expired | cancelled
+  latitude            Float?
+  longitude           Float?
+  imageUrl            String?
+  allergens           String?  // JSON string or comma-separated
+  dietaryTags         String?  // JSON string or comma-separated
+  isBulkEventSurplus  Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
   deletedAt           DateTime?
-  donor               DonorProfile  @relation(fields: [donorId], references: [id])
+
+  donor               DonorProfile? @relation(fields: [donorId], references: [id])
   claims              ListingClaim[]
+
   @@map("food_listings")
 }
 
 model ListingClaim {
-  id          String      @id @default(uuid())
-  listingId   String
-  claimerId   String
-  status      ClaimStatus @default(pending)
-  pickupNotes String?     @db.Text
-  claimedAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  listing     FoodListing @relation(fields: [listingId], references: [id])
-  claimer     User        @relation(fields: [claimerId], references: [id])
+  id               String   @id @default(uuid())
+  listingId        String
+  claimerId        String?
+  claimerName      String
+  claimerEmail     String?
+  claimerPhone     String?
+  claimerRole      String   @default("individual") // individual | ngo | donor
+  pickupSlot       String
+  notes            String?
+  status           String   @default("pending") // pending | approved | rejected | fulfilled | cancelled
+  verificationCode String   // e.g. "FS-789012"
+  claimedAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  listing          FoodListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  claimer          User?       @relation(fields: [claimerId], references: [id])
+
   @@map("listing_claims")
 }
 
 model FridgeIngredient {
-  id          String              @id @default(uuid())
-  userId      String
+  id          String    @id @default(uuid())
+  userId      String?
   name        String
-  category    IngredientCategory
-  quantity    Decimal?            @db.Decimal(10, 2)
+  category    String    @default("produce") // produce | dairy | meat | pantry | frozen | other
+  quantity    Float?
   unit        String?
-  expiryDate  DateTime            @db.Date
-  addedAt     DateTime            @default(now())
+  expiryDate  DateTime
+  addedAt     DateTime  @default(now())
   consumedAt  DateTime?
   discardedAt DateTime?
-  user        User                @relation(fields: [userId], references: [id])
+  user        User?     @relation(fields: [userId], references: [id])
+
   @@map("fridge_ingredients")
 }
 
 model SavingsLog {
   id          String   @id @default(uuid())
   userId      String
-  amountSaved Decimal  @db.Decimal(10, 2)
-  currency    String   @default("USD")
-  description String?  @db.Text
+  amountSaved Float
+  currency    String   @default("₹")
+  description String?
   recordedAt  DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id])
+
   @@map("savings_log")
 }
 
 model CommunityLocation {
-  id             String       @id @default(uuid())
-  name           String
-  type           LocationType
-  address        String       @db.Text
-  latitude       Decimal?     @db.Decimal(10, 8)
-  longitude      Decimal?     @db.Decimal(11, 8)
-  managedBy      String?
-  operatingHours String?      @db.Text
-  isVerified     Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  manager        User?        @relation(fields: [managedBy], references: [id])
-  inventory      LocationInventory[]
-  needs          LocationNeed[]
+  id                 String              @id @default(uuid())
+  name               String
+  type               String              // community_fridge | food_bank | shelter | community_kitchen | civic_pantry
+  address            String
+  city               String?
+  country            String?
+  countryCode        String?
+  latitude           Float?
+  longitude          Float?
+  managedBy          String?
+  operatingHours     String?
+  isVerified         Boolean             @default(false)
+  currentStockLevel  String?             @default("Moderate")
+  capacityNotes      String?
+  contactPhone       String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  manager            User?               @relation(fields: [managedBy], references: [id])
+  inventory          LocationInventory[]
+  needs              LocationNeed[]
+
   @@map("community_locations")
 }
 
 model LocationInventory {
-  id         String            @id @default(uuid())
-  locationId String
-  itemName   String
-  quantity   Decimal?          @db.Decimal(10, 2)
-  unit       String?
-  lastUpdated DateTime         @default(now())
-  updatedBy  String?
-  location   CommunityLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  id          String            @id @default(uuid())
+  locationId  String
+  itemName    String
+  quantity    Float?
+  unit        String?
+  lastUpdated DateTime          @default(now())
+  updatedBy   String?
+  location    CommunityLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
   @@map("location_inventory")
 }
 
 model LocationNeed {
-  id          String            @id @default(uuid())
-  locationId  String
-  itemName    String
-  urgencyLevel Int              @db.SmallInt
-  fulfilled   Boolean           @default(false)
-  createdAt   DateTime          @default(now())
-  location    CommunityLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  id           String            @id @default(uuid())
+  locationId   String
+  itemName     String
+  urgencyLevel Int               @default(1)
+  fulfilled    Boolean           @default(false)
+  createdAt    DateTime          @default(now())
+  location     CommunityLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
   @@map("location_needs")
 }
 
 model WasteLog {
-  id             String        @id @default(uuid())
-  userId         String
-  itemName       String
-  category       String
-  quantity       Decimal       @db.Decimal(10, 2)
-  unit           WasteUnit
-  estimatedCost  Decimal?      @db.Decimal(10, 2)
-  carbonFootprint Decimal?     @db.Decimal(10, 4)
-  reason         String?
-  loggedAt       DateTime      @default(now())
-  user           User          @relation(fields: [userId], references: [id])
+  id              String   @id @default(uuid())
+  userId          String
+  itemName        String
+  category        String
+  quantity        Float
+  unit            String   @default("kg")
+  estimatedCost   Float?
+  carbonFootprint Float?
+  reason          String?
+  loggedAt        DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id])
+
   @@map("waste_logs")
 }

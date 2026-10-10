@@ -15,6 +15,7 @@ import {
   Globe2,
 } from "lucide-react";
 import { WORLD_COUNTRIES } from "@/lib/countries";
+import { useAuth } from "@/context/auth-context";
 
 export default function PostSurplusPage() {
   const router = useRouter();
@@ -35,14 +36,62 @@ export default function PostSurplusPage() {
     hoursUntilExpiry: "4",
   });
 
+  const { user } = useAuth();
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Pre-fill donor details if logged in as donor
+  React.useEffect(() => {
+    if (user?.organizationName || user?.fullName) {
+      setFormData((prev) => ({
+        ...prev,
+        donorName: prev.donorName || user.organizationName || user.fullName,
+        donorCity: prev.donorCity || user.city || "Mumbai",
+      }));
+    }
+  }, [user]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitted(true);
-    setTimeout(() => {
-      router.push("/listings");
-    }, 2000);
+    setSubmitting(true);
+    setErrorMsg("");
+
+    try {
+      const res = await fetch("/api/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: formData.title,
+          description: formData.description,
+          category: formData.category,
+          quantity: formData.quantity,
+          price: formData.isFree ? 0 : parseFloat(formData.price) || 0,
+          originalPrice: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
+          donorName: formData.donorName,
+          donorCountry: formData.donorCountry,
+          donorCity: formData.donorCity,
+          donorAddress: formData.donorAddress,
+          pickupStartTime: formData.pickupStartTime,
+          pickupEndTime: formData.pickupEndTime,
+          expiryTime: new Date(Date.now() + (parseInt(formData.hoursUntilExpiry) || 4) * 3600 * 1000).toISOString(),
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSubmitted(true);
+        setTimeout(() => {
+          router.push("/listings");
+        }, 1500);
+      } else {
+        setErrorMsg(data.error || "Failed to create listing");
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || "Network error submitting listing");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

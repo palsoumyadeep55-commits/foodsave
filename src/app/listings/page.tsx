@@ -22,6 +22,7 @@ import {
 export default function ListingsPage() {
   const { location: userLoc } = useLocation();
   const [listings, setListings] = useState<FoodListingItem[]>(initialListings);
+  const [loadingListings, setLoadingListings] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [selectedCountry, setSelectedCountry] = useState<string>("All Countries");
@@ -33,6 +34,26 @@ export default function ListingsPage() {
   // Claim modal state
   const [activeListingForClaim, setActiveListingForClaim] = useState<FoodListingItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Fetch live listings from backend API
+  React.useEffect(() => {
+    async function loadLiveListings() {
+      setLoadingListings(true);
+      try {
+        const res = await fetch("/api/listings");
+        const data = await res.json();
+        if (data.success && data.listings && data.listings.length > 0) {
+          // Merge with initialListings if needed or use live data
+          setListings(data.listings);
+        }
+      } catch (err) {
+        console.warn("Using fallback initial listings:", err);
+      } finally {
+        setLoadingListings(false);
+      }
+    }
+    loadLiveListings();
+  }, []);
 
   const categories = ["All", "Meals", "Produce", "Bakery", "Dairy"];
   const countries = ["All Countries", "India", "Singapore", "Japan", "United States", "United Kingdom", "Spain"];

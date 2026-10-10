@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { initialFridgeIngredients } from "@/lib/mock-data";
 import { FridgeIngredientItem } from "@/types";
 import { IngredientCard } from "@/components/fridge/ingredient-card";
+import { BarcodeScannerModal } from "@/components/fridge/barcode-scanner-modal";
 import { daysUntilExpiry } from "@/lib/utils";
 import {
   Refrigerator,
@@ -17,12 +18,17 @@ import {
   CheckCircle2,
   Globe2,
   UtensilsCrossed,
+  Camera,
+  ScanBarcode,
+  RefreshCw,
 } from "lucide-react";
 
 export default function FridgePage() {
   const [ingredients, setIngredients] = useState<FridgeIngredientItem[]>(initialFridgeIngredients);
   const [filter, setFilter] = useState<"all" | "urgent" | "safe">("all");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showScannerModal, setShowScannerModal] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   // New ingredient form state
   const [name, setName] = useState("");
@@ -35,6 +41,25 @@ export default function FridgePage() {
 
   const [notification, setNotification] = useState<string | null>(null);
 
+  const fetchLiveIngredients = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/fridge");
+      const data = await res.json();
+      if (data.success && data.ingredients && data.ingredients.length > 0) {
+        setIngredients(data.ingredients);
+      }
+    } catch {
+      // Keep fallback
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveIngredients();
+  }, []);
+
   const quickStaples = [
     { name: "Cooked Rice (Basmati / Jasmine)", category: "pantry", qty: 400, unit: "g" },
     { name: "Day-Old Chapatis / Rotis", category: "pantry", qty: 4, unit: "items" },
@@ -46,50 +71,144 @@ export default function FridgePage() {
     { name: "Ripe Bananas", category: "produce", qty: 3, unit: "items" },
   ];
 
-  const handleQuickAdd = (staple: typeof quickStaples[0]) => {
-    const newItem: FridgeIngredientItem = {
-      id: `ing-${Date.now()}`,
-      name: staple.name,
-      category: staple.category as any,
-      quantity: staple.qty,
-      unit: staple.unit,
-      expiryDate: new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString().split("T")[0],
-      addedAt: new Date().toISOString(),
-    };
-    setIngredients([newItem, ...ingredients]);
+  const handleQuickAdd = async (staple: typeof quickStaples[0]) => {
+    const expiry = new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString().split("T")[0];
+    try {
+      const res = await fetch("/api/fridge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: staple.name,
+          category: staple.category,
+          quantity: staple.qty,
+          unit: staple.unit,
+          expiryDate: expiry,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.ingredient) {
+        setIngredients([data.ingredient, ...ingredients]);
+      } else {
+        const fallback: FridgeIngredientItem = {
+          id: `ing-${Date.now()}`,
+          name: staple.name,
+          category: staple.category as any,
+          quantity: staple.qty,
+          unit: staple.unit,
+          expiryDate: expiry,
+          addedAt: new Date().toISOString(),
+        };
+        setIngredients([fallback, ...ingredients]);
+      }
+    } catch {
+      const fallback: FridgeIngredientItem = {
+        id: `ing-${Date.now()}`,
+        name: staple.name,
+        category: staple.category as any,
+        quantity: staple.qty,
+        unit: staple.unit,
+        expiryDate: expiry,
+        addedAt: new Date().toISOString(),
+      };
+      setIngredients([fallback, ...ingredients]);
+    }
     triggerNotification(`Added "${staple.name}". Tap "Find Recipes" to rescue!`);
   };
 
-  const handleAddIngredient = (e: React.FormEvent) => {
+  const handleAddIngredient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    const newItem: FridgeIngredientItem = {
-      id: `ing-${Date.now()}`,
-      name: name.trim(),
-      category,
-      quantity: parseFloat(quantity) || 1,
-      unit,
-      expiryDate,
-      addedAt: new Date().toISOString(),
-    };
+    try {
+      const res = await fetch("/api/fridge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          category,
+          quantity: parseFloat(quantity) || 1,
+          unit,
+          expiryDate,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.ingredient) {
+        setIngredients([data.ingredient, ...ingredients]);
+      } else {
+        const fallback: FridgeIngredientItem = {
+          id: `ing-${Date.now()}`,
+          name: name.trim(),
+          category,
+          quantity: parseFloat(quantity) || 1,
+          unit,
+          expiryDate,
+          addedAt: new Date().toISOString(),
+        };
+        setIngredients([fallback, ...ingredients]);
+      }
+    } catch {
+      const fallback: FridgeIngredientItem = {
+        id: `ing-${Date.now()}`,
+        name: name.trim(),
+        category,
+        quantity: parseFloat(quantity) || 1,
+        unit,
+        expiryDate,
+        addedAt: new Date().toISOString(),
+      };
+      setIngredients([fallback, ...ingredients]);
+    }
 
-    setIngredients([newItem, ...ingredients]);
     setName("");
     setShowAddForm(false);
-    triggerNotification(`Added "${newItem.name}" to fridge`);
+    triggerNotification(`Added "${name}" to fridge`);
   };
 
-  const handleUseIngredient = (id: string) => {
+  const handleItemsDetected = async (items: any[]) => {
+    for (const item of items) {
+      try {
+        const res = await fetch("/api/fridge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item),
+        });
+        const data = await res.json();
+        if (data.success && data.ingredient) {
+          setIngredients((prev) => [data.ingredient, ...prev]);
+        }
+      } catch {
+        // Fallback
+      }
+    }
+    triggerNotification(`Successfully scanned & logged ${items.length} items to your fridge!`);
+  };
+
+  const handleUseIngredient = async (id: string) => {
     const item = ingredients.find((i) => i.id === id);
     setIngredients(ingredients.filter((i) => i.id !== id));
+    try {
+      await fetch("/api/fridge", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "consume" }),
+      });
+    } catch {
+      // Local state already updated
+    }
     if (item) {
       triggerNotification(`Great job! Rescued "${item.name}" (+$3.50 saved)`);
     }
   };
 
-  const handleDiscardIngredient = (id: string) => {
+  const handleDiscardIngredient = async (id: string) => {
     setIngredients(ingredients.filter((i) => i.id !== id));
+    try {
+      await fetch(`/api/fridge?id=${id}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Local state already updated
+    }
   };
 
   const triggerNotification = (msg: string) => {
@@ -133,11 +252,19 @@ export default function FridgePage() {
 
             <div className="flex flex-wrap items-center gap-3">
               <button
+                onClick={() => setShowScannerModal(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-700 px-5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 transition cursor-pointer shadow-xs"
+              >
+                <Camera className="h-4 w-4 text-emerald-200" />
+                Scan Barcode / Receipt
+              </button>
+
+              <button
                 onClick={() => setShowAddForm(!showAddForm)}
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-[#1d1d1f] px-5 py-2.5 text-xs font-semibold text-white hover:bg-[#333336] transition cursor-pointer"
               >
                 <Plus className="h-4 w-4 text-emerald-400" />
-                Add Ingredient
+                Manual Add
               </button>
 
               <Link
@@ -170,172 +297,113 @@ export default function FridgePage() {
         </div>
       </div>
 
-      {/* Floating Notification */}
-      {notification && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-full bg-[#1d1d1f] px-6 py-3.5 text-xs font-medium text-white shadow-2xl animate-in fade-in slide-in-from-bottom duration-200">
-          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-          <span>{notification}</span>
-        </div>
-      )}
-
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-7 space-y-6">
-        {/* Urgent Warning Banner */}
-        {urgentCount > 0 && (
-          <div className="flex items-center justify-between rounded-[22px] border border-rose-200/80 bg-rose-50/70 p-4 sm:p-5 shadow-xs">
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 text-rose-700 shrink-0">
-                <AlertCircle className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-rose-950">
-                  {urgentCount} item{urgentCount > 1 ? "s" : ""} expiring in the next 3 days
-                </h3>
-                <p className="text-xs text-rose-800 mt-0.5">
-                  Rescue them today with delicious recipes to prevent unnecessary kitchen waste.
-                </p>
-              </div>
-            </div>
-
-            <Link
-              href="/fridge/recipes"
-              className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-rose-700 px-5 py-2 text-xs font-semibold text-white hover:bg-rose-800 transition"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              Rescue With Recipes
-            </Link>
+      {/* Main Container */}
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8 space-y-6">
+        {/* Floating Notification */}
+        {notification && (
+          <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-full bg-[#1d1d1f] px-6 py-3.5 text-xs font-medium text-white shadow-2xl animate-in fade-in slide-in-from-bottom duration-200">
+            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+            <span>{notification}</span>
           </div>
         )}
 
-        {/* Add Ingredient Form (Collapsible) */}
+        {/* Add Ingredient Form Drawer */}
         {showAddForm && (
-          <div className="rounded-[24px] border border-black/[0.08] bg-white p-6 shadow-xs animate-in fade-in duration-200">
-            <h3 className="text-sm font-semibold text-[#1d1d1f] mb-4 flex items-center gap-2">
-              <Plus className="h-4 w-4 text-emerald-700" />
-              Add an Ingredient to Fridge
+          <div className="rounded-[24px] border border-black/[0.08] bg-white p-6 shadow-sm animate-in fade-in duration-200">
+            <h3 className="text-sm font-semibold text-[#1d1d1f] mb-4">
+              Add Item to Virtual Fridge
             </h3>
-
-            <form onSubmit={handleAddIngredient} className="grid grid-cols-1 sm:grid-cols-5 gap-3.5">
+            <form onSubmit={handleAddIngredient} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
               <div className="sm:col-span-2">
-                <label className="block text-[11px] font-semibold text-[#1d1d1f] mb-1">
-                  Item Name *
-                </label>
                 <input
                   type="text"
-                  required
-                  placeholder="e.g. Cooked rice, tortillas, dahi, palak..."
+                  placeholder="Ingredient name (e.g. Leftover Rice, Paneer, Spinach)"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full rounded-xl border border-black/[0.1] bg-[#f5f5f7] px-3.5 py-2 text-xs text-[#1d1d1f] focus:bg-white focus:outline-none focus:border-[#1d1d1f]"
+                  className="w-full rounded-xl border border-black/[0.1] px-3.5 py-2 text-xs text-[#1d1d1f] placeholder-[#86868b] focus:border-[#1d1d1f] focus:outline-hidden"
+                  required
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-[#1d1d1f] mb-1">
-                  Category
-                </label>
                 <select
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-xl border border-black/[0.1] bg-[#f5f5f7] px-3 py-2 text-xs text-[#1d1d1f] focus:bg-white focus:outline-none focus:border-[#1d1d1f]"
+                  onChange={(e) => setCategory(e.target.value as any)}
+                  className="w-full rounded-xl border border-black/[0.1] px-3.5 py-2 text-xs text-[#1d1d1f] bg-white focus:border-[#1d1d1f] focus:outline-hidden"
                 >
-                  <option value="produce">Produce 🥦</option>
-                  <option value="dairy">Dairy 🧀</option>
-                  <option value="pantry">Pantry & Grains 🍚</option>
-                  <option value="frozen">Frozen ❄️</option>
-                  <option value="other">Other 🥗</option>
+                  <option value="produce">Produce (Veggies & Fruits)</option>
+                  <option value="dairy">Dairy & Cheese</option>
+                  <option value="pantry">Pantry & Grains</option>
+                  <option value="meat">Meat / Protein</option>
+                  <option value="frozen">Frozen</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-semibold text-[#1d1d1f] mb-1">
-                  Quantity
-                </label>
-                <div className="flex gap-1.5">
-                  <input
-                    type="number"
-                    min="0.1"
-                    step="0.1"
-                    value={quantity}
-                    onChange={(e) => setQuantity(e.target.value)}
-                    className="w-16 rounded-xl border border-black/[0.1] bg-[#f5f5f7] px-2 py-2 text-xs text-[#1d1d1f] text-center focus:bg-white focus:outline-none focus:border-[#1d1d1f]"
-                  />
-                  <select
-                    value={unit}
-                    onChange={(e) => setUnit(e.target.value)}
-                    className="flex-1 rounded-xl border border-black/[0.1] bg-[#f5f5f7] px-2 py-2 text-xs text-[#1d1d1f] focus:bg-white focus:outline-none focus:border-[#1d1d1f]"
-                  >
-                    <option value="items">items</option>
-                    <option value="g">grams</option>
-                    <option value="kg">kg</option>
-                    <option value="liters">liters</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-[#1d1d1f] mb-1">
-                  Expiry Date *
-                </label>
+              <div className="flex gap-1.5">
                 <input
-                  type="date"
-                  required
-                  value={expiryDate}
-                  onChange={(e) => setExpiryDate(e.target.value)}
-                  className="w-full rounded-xl border border-black/[0.1] bg-[#f5f5f7] px-3 py-2 text-xs text-[#1d1d1f] focus:bg-white focus:outline-none focus:border-[#1d1d1f]"
+                  type="number"
+                  min="0.1"
+                  step="any"
+                  placeholder="Qty"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                  className="w-16 rounded-xl border border-black/[0.1] px-3 py-2 text-xs text-[#1d1d1f] focus:border-[#1d1d1f] focus:outline-hidden"
+                />
+                <input
+                  type="text"
+                  placeholder="Unit (g, items, kg)"
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value)}
+                  className="w-full rounded-xl border border-black/[0.1] px-3 py-2 text-xs text-[#1d1d1f] focus:border-[#1d1d1f] focus:outline-hidden"
                 />
               </div>
 
-              <div className="sm:col-span-5 flex justify-end gap-2.5 mt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddForm(false)}
-                  className="px-4 py-2 text-xs font-medium text-[#6e6e73] hover:bg-black/[0.04] rounded-full"
-                >
-                  Cancel
-                </button>
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={expiryDate}
+                  onChange={(e) => setExpiryDate(e.target.value)}
+                  className="w-full rounded-xl border border-black/[0.1] px-3 py-2 text-xs text-[#1d1d1f] bg-white focus:border-[#1d1d1f] focus:outline-hidden"
+                  required
+                />
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-semibold text-white bg-[#1d1d1f] hover:bg-[#333336] rounded-full transition"
+                  className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800 transition cursor-pointer"
                 >
-                  Save to Fridge
+                  Add
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {/* Filter Bar */}
-        <div className="flex items-center justify-between border-b border-black/[0.06] pb-3">
-          <div className="flex items-center gap-2">
+        {/* Filter and stats row */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={() => setFilter("all")}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
-                filter === "all"
-                  ? "bg-[#1d1d1f] text-white"
-                  : "bg-white text-[#6e6e73] border border-black/[0.08] hover:bg-[#f5f5f7]"
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
+                filter === "all" ? "bg-[#1d1d1f] text-white" : "bg-[#f5f5f7] text-[#6e6e73]"
               }`}
             >
               All Items ({ingredients.length})
             </button>
             <button
               onClick={() => setFilter("urgent")}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
-                filter === "urgent"
-                  ? "bg-rose-700 text-white"
-                  : "bg-white text-[#6e6e73] border border-black/[0.08] hover:bg-[#f5f5f7]"
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
+                filter === "urgent" ? "bg-rose-700 text-white" : "bg-[#f5f5f7] text-[#6e6e73]"
               }`}
             >
-              ⚠️ Expiring Soon ({urgentCount})
+              Expiring Soon ({urgentCount})
             </button>
             <button
               onClick={() => setFilter("safe")}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
-                filter === "safe"
-                  ? "bg-emerald-700 text-white"
-                  : "bg-white text-[#6e6e73] border border-black/[0.08] hover:bg-[#f5f5f7]"
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
+                filter === "safe" ? "bg-emerald-700 text-white" : "bg-[#f5f5f7] text-[#6e6e73]"
               }`}
             >
-              Fresh ({ingredients.length - urgentCount})
+              Safe (4+ Days)
             </button>
           </div>
 
@@ -360,6 +428,13 @@ export default function FridgePage() {
           ))}
         </div>
       </div>
+
+      {/* Barcode & Camera Scanner Modal */}
+      <BarcodeScannerModal
+        isOpen={showScannerModal}
+        onClose={() => setShowScannerModal(false)}
+        onItemsDetected={handleItemsDetected}
+      />
     </div>
   );
 }
