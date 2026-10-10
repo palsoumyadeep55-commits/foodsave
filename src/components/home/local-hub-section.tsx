@@ -264,7 +264,7 @@ export function LocalHubSection() {
               </div>
               <h2 className="mt-1.5 text-2xl sm:text-3xl font-semibold text-[#1d1d1f] tracking-[-0.03em]">
                 Explore Resources In{" "}
-                <span className="text-emerald-800 underline decoration-emerald-300 decoration-wavy underline-offset-4">
+                <span className="text-emerald-800">
                   {location.city}, {location.country}
                 </span>
               </h2>
